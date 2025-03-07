@@ -30,43 +30,43 @@ def main():
     print(f"Found {len(csv_files)} CSV files in '{data_dir}':")
     
     # Process each CSV file
-    for i, csv_file in enumerate(csv_files, 1):
-        filename = os.path.basename(csv_file)
-        # print(f"\n{i}. Processing file: {filename}")
-        # print("-" * 50)
+    # for i, csv_file in enumerate(csv_files, 1):
+    #     filename = os.path.basename(csv_file)
+    #     # print(f"\n{i}. Processing file: {filename}")
+    #     # print("-" * 50)
         
-        try:
-            # Read the CSV file using pandas
-            df = pd.read_csv(csv_file)
+    #     try:
+    #         # Read the CSV file using pandas
+    #         df = pd.read_csv(csv_file)
             
-            # Get file information
-            file_size = os.path.getsize(csv_file) / (1024 * 1024)  # Convert to MB
-            row_count = len(df)
-            col_count = len(df.columns)
+    #         # Get file information
+    #         file_size = os.path.getsize(csv_file) / (1024 * 1024)  # Convert to MB
+    #         row_count = len(df)
+    #         col_count = len(df.columns)
             
-            # Print file statistics
-            # print(f"File size: {file_size:.2f} MB")
-            # print(f"Rows: {row_count}, Columns: {col_count}")
-            # print("Column names:")
-            # for col in df.columns:
-                # print(f"  - {col}")
+    #         # Print file statistics
+    #         # print(f"File size: {file_size:.2f} MB")
+    #         # print(f"Rows: {row_count}, Columns: {col_count}")
+    #         # print("Column names:")
+    #         # for col in df.columns:
+    #             # print(f"  - {col}")
             
-            # Print first 5 rows of the dataframe
-            # print("\nFirst 5 rows:")
-            # print(df.head(5).to_string())
+    #         # Print first 5 rows of the dataframe
+    #         # print("\nFirst 5 rows:")
+    #         # print(df.head(5).to_string())
             
-            # Basic data quality checks
-            print("\nData quality summary:")
-            print(f"Missing values: {df.isna().sum().sum()}")
+    #         # Basic data quality checks
+    #         print("\nData quality summary:")
+    #         print(f"Missing values: {df.isna().sum().sum()}")
             
-            # For numeric columns, print some statistics
-            numeric_cols = df.select_dtypes(include=['number']).columns
-            if len(numeric_cols) > 0:
-                print("\nNumeric columns statistics:")
-                print(df[numeric_cols].describe().to_string())
+    #         # For numeric columns, print some statistics
+    #         numeric_cols = df.select_dtypes(include=['number']).columns
+    #         if len(numeric_cols) > 0:
+    #             print("\nNumeric columns statistics:")
+    #             print(df[numeric_cols].describe().to_string())
             
-        except Exception as e:
-            print(f"Error processing file {filename}: {str(e)}")
+    #     except Exception as e:
+    #         print(f"Error processing file {filename}: {str(e)}")
     
     print("\n" + "=" * 50)
     print("Data integrity check completed successfully!")
