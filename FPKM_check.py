@@ -48,7 +48,7 @@ def main():
             print(f"File size: {file_size:.2f} MB")
             print(f"Rows: {row_count}, Columns: {col_count}")
             print("Column names:")
-            for col in df.columns:
+            # for col in df.columns:
                 # print(f"  - {col}")
             
             # Print first 5 rows of the dataframe
