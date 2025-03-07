@@ -32,8 +32,8 @@ def main():
     # Process each CSV file
     for i, csv_file in enumerate(csv_files, 1):
         filename = os.path.basename(csv_file)
-        print(f"\n{i}. Processing file: {filename}")
-        print("-" * 50)
+        # print(f"\n{i}. Processing file: {filename}")
+        # print("-" * 50)
         
         try:
             # Read the CSV file using pandas
@@ -45,8 +45,8 @@ def main():
             col_count = len(df.columns)
             
             # Print file statistics
-            print(f"File size: {file_size:.2f} MB")
-            print(f"Rows: {row_count}, Columns: {col_count}")
+            # print(f"File size: {file_size:.2f} MB")
+            # print(f"Rows: {row_count}, Columns: {col_count}")
             # print("Column names:")
             # for col in df.columns:
                 # print(f"  - {col}")
