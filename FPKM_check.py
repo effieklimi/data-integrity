@@ -9,7 +9,7 @@ import glob
 
 def main():
     """Main function to read and display CSV file information."""
-    print("Hello from integrity check script!")
+    print("Hello from integrity check script FPKM_check!")
     print("=" * 50)
     
     # Path to the data directory
