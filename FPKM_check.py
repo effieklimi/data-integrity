@@ -49,7 +49,7 @@ def main():
             print(f"Rows: {row_count}, Columns: {col_count}")
             print("Column names:")
             for col in df.columns:
-                print(f"  - {col}")
+                # print(f"  - {col}")
             
             # Print first 5 rows of the dataframe
             print("\nFirst 5 rows:")
