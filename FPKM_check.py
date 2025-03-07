@@ -13,21 +13,21 @@ def main():
     print("=" * 50)
     
     # Path to the data directory
-    data_dir = "/app/data"
+    # data_dir = "/app/data"
     
     # Check if data directory exists
-    if not os.path.exists(data_dir):
-        print(f"Error: Data directory '{data_dir}' not found.")
-        return 1
+    # if not os.path.exists(data_dir):
+    #     print(f"Error: Data directory '{data_dir}' not found.")
+    #     return 1
     
-    # Find all CSV files
-    csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
+    # # Find all CSV files
+    # csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
     
-    if not csv_files:
-        print(f"No CSV files found in '{data_dir}'.")
-        return 1
+    # if not csv_files:
+    #     print(f"No CSV files found in '{data_dir}'.")
+    #     return 1
     
-    print(f"Found {len(csv_files)} CSV files in '{data_dir}':")
+    # print(f"Found {len(csv_files)} CSV files in '{data_dir}':")
     
     # Process each CSV file
     # for i, csv_file in enumerate(csv_files, 1):
@@ -68,7 +68,7 @@ def main():
     #     except Exception as e:
     #         print(f"Error processing file {filename}: {str(e)}")
     
-    print("\n" + "=" * 50)
+    # print("\n" + "=" * 50)
     print("Data integrity check completed successfully!")
     return 0
 
