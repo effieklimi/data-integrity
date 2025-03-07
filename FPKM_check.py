@@ -53,7 +53,7 @@ def main():
             
             # Print first 5 rows of the dataframe
             print("\nFirst 5 rows:")
-            print(df.head(5).to_string())
+            # print(df.head(5).to_string())
             
             # Basic data quality checks
             print("\nData quality summary:")
