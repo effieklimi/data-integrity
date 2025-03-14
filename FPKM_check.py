@@ -10,17 +10,21 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import json
 from matplotlib.backends.backend_pdf import PdfPages
+import time
 
 def load_rnaseq_data(file_path):
     """Load RNA-seq count data from CSV file."""
     print(f"Loading data from: {file_path}")
+    time.sleep(3) 
     try:
         # Assuming tab-separated file based on your example
         df = pd.read_csv(file_path, sep='\t')
         print(f"Successfully loaded data with {df.shape[0]} genes and {df.shape[1]} columns")
+        time.sleep(3) 
         return df
     except Exception as e:
         print(f"Error loading data: {e}")
+        time.sleep(3) 
         return None
 
 def identify_sample_columns(df):
@@ -28,12 +32,16 @@ def identify_sample_columns(df):
     # Assuming that columns with gene info are: ENSEMBL, name, type, chr, start, end, str
     metadata_cols = ['ENSEMBL', 'name', 'type', 'chr', 'start', 'end', 'str']
     sample_cols = [col for col in df.columns if col not in metadata_cols]
+    time.sleep(3) 
     print(f"Identified {len(sample_cols)} sample columns")
+    time.sleep(3) 
     return metadata_cols, sample_cols
 
 def check_library_size(df, sample_cols, output_dir):
     """Check total counts per sample to identify sequencing depth outliers."""
+    time.sleep(3) 
     print("\n=== Checking Library Size / Sequencing Depth ===")
+    time.sleep(3) 
     
     # Calculate total counts per sample
     lib_sizes = df[sample_cols].sum()
@@ -45,9 +53,13 @@ def check_library_size(df, sample_cols, output_dir):
     max_size = lib_sizes.max()
     
     print(f"Mean library size: {mean_size:.2f}")
+    time.sleep(3) 
     print(f"Library size std dev: {std_size:.2f}")
+    time.sleep(3) 
     print(f"Minimum library size: {min_size:.2f} ({lib_sizes.idxmin()})")
+    time.sleep(3) 
     print(f"Maximum library size: {max_size:.2f} ({lib_sizes.idxmax()})")
+    time.sleep(3) 
     
     # Identify potential outliers (>2 standard deviations from mean)
     low_outliers = lib_sizes[lib_sizes < (mean_size - 2 * std_size)]
@@ -55,13 +67,17 @@ def check_library_size(df, sample_cols, output_dir):
     
     if len(low_outliers) > 0:
         print("\nPotential low-depth outliers:")
+        time.sleep(3) 
         for sample, size in low_outliers.items():
             print(f"  {sample}: {size:.2f} counts")
+            time.sleep(3) 
     
     if len(high_outliers) > 0:
         print("\nPotential high-depth outliers:")
+        time.sleep(3) 
         for sample, size in high_outliers.items():
             print(f"  {sample}: {size:.2f} counts")
+            time.sleep(3) 
     
     # Create a bar plot of library sizes
     plt.figure(figsize=(12, 6))
@@ -87,7 +103,9 @@ def check_library_size(df, sample_cols, output_dir):
 
 def check_count_distribution(df, sample_cols, output_dir):
     """Examine the distribution of counts within each sample."""
+    time.sleep(3) 
     print("\n=== Checking Count Distribution ===")
+    time.sleep(3) 
     
     # Create a PDF to store all plots
     pdf_path = os.path.join(output_dir, 'count_distributions.pdf')
@@ -124,10 +142,13 @@ def check_count_distribution(df, sample_cols, output_dir):
             plt.close()
     
     print(f"Count distribution plots saved to {pdf_path}")
+    time.sleep(3) 
 
 def check_highly_expressed_genes(df, metadata_cols, sample_cols, output_dir):
     """Check if a small number of genes dominate the counts."""
+    time.sleep(3) 
     print("\n=== Checking for Highly Expressed Genes ===")
+    time.sleep(3) 
     
     # Calculate percentage of total counts per gene across all samples
     count_data = df[sample_cols]
@@ -147,8 +168,10 @@ def check_highly_expressed_genes(df, metadata_cols, sample_cols, output_dir):
     
     # Report top 20 most expressed genes
     print("\nTop 20 most expressed genes:")
+    time.sleep(3) 
     for i, (_, row) in enumerate(gene_counts_df.head(20).iterrows(), 1):
         print(f"{i}. {row['gene_name']} ({row['gene_id']}): {row['percentage']:.2f}% of total counts")
+        time.sleep(3) 
     
     # Calculate cumulative percentage
     gene_counts_df['cumulative_percentage'] = gene_counts_df['percentage'].cumulative_sum()
@@ -159,7 +182,9 @@ def check_highly_expressed_genes(df, metadata_cols, sample_cols, output_dir):
     
     total_genes = len(gene_counts_df)
     print(f"\n{genes_50pct} genes ({(genes_50pct/total_genes)*100:.2f}%) account for 50% of all counts")
+    time.sleep(3) 
     print(f"{genes_75pct} genes ({(genes_75pct/total_genes)*100:.2f}%) account for 75% of all counts")
+    time.sleep(3) 
     
     # Plot cumulative distribution of gene expression
     plt.figure(figsize=(10, 6))
@@ -195,6 +220,7 @@ def check_highly_expressed_genes(df, metadata_cols, sample_cols, output_dir):
 def check_missing_values(df, metadata_cols, sample_cols):
     """Check for unexpected NAs or zeros in the data."""
     print("\n=== Checking for Missing Values ===")
+    time.sleep(3) 
     
     # Check for NAs in the entire dataset
     na_counts = df.isna().sum()
@@ -202,36 +228,47 @@ def check_missing_values(df, metadata_cols, sample_cols):
     
     if total_nas > 0:
         print(f"Found {total_nas} NA values in the dataset")
+        time.sleep(3) 
         print("NA counts per column:")
+        time.sleep(3) 
         for col, count in na_counts[na_counts > 0].items():
             print(f"  {col}: {count} NAs")
+            time.sleep(3) 
     else:
         print("No NA values found in the dataset")
+        time.sleep(3) 
     
     # Check for zeros in count data
     zeros_per_sample = (df[sample_cols] == 0).sum()
     total_genes = df.shape[0]
     
     print("\nZero counts per sample:")
+    time.sleep(3) 
     for sample, zeros in zeros_per_sample.items():
         percentage = (zeros / total_genes) * 100
         print(f"  {sample}: {zeros} zeros ({percentage:.2f}% of genes)")
+        time.sleep(3) 
     
     # Identify genes that are zero across all samples (might be problematic)
     all_zero_genes = df[(df[sample_cols] == 0).all(axis=1)]
     if len(all_zero_genes) > 0:
         print(f"\nFound {len(all_zero_genes)} genes with zero counts across all samples:")
+        time.sleep(3) 
         for _, row in all_zero_genes.iterrows():
             print(f"  {row['name']} ({row['ENSEMBL']})")
+            time.sleep(3) 
     else:
         print("\nNo genes with zero counts across all samples")
+        time.sleep(3) 
     
     return zeros_per_sample, all_zero_genes
 
 def main():
     """Main function to perform RNA-seq QC checks."""
     print("Starting RNA-seq Quality Control Script")
+    time.sleep(3) 
     print("=" * 50)
+    time.sleep(3) 
     
     # Path to the data directory
     data_dir = "/app/data"
@@ -239,6 +276,7 @@ def main():
     # Check if data directory exists
     if not os.path.exists(data_dir):
         print(f"Error: Data directory '{data_dir}' not found.")
+        time.sleep(3) 
         return 1
     
     # Create output directory for plots and reports
@@ -246,6 +284,7 @@ def main():
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         print(f"Created output directory: {output_dir}")
+        time.sleep(3) 
     
     # File path for the RNA-seq data
     file_path = os.path.join(data_dir, "HSVSMC.csv")
@@ -294,6 +333,7 @@ def main():
         f.write(f"Genes with all zeros across samples: {len(all_zero_genes)}\n")
     
     print(f"\nQC summary report saved to {report_path}")
+    time.sleep(3) 
     
     # Create JSON output with key QC metrics
     qc_data = {
@@ -341,7 +381,9 @@ def main():
         json.dump(qc_data, f, indent=4)
     
     print(f"QC metrics JSON saved to {json_path}")
+    time.sleep(3) 
     print("\nData quality control check completed successfully!")
+    time.sleep(3) 
     return 0
 
 if __name__ == "__main__":
