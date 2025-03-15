@@ -287,8 +287,13 @@ def main():
         time.sleep(3) 
     
     # File path for the RNA-seq data
-    file_path = os.path.join(data_dir, "HSVSMC.csv")
-    
+    import glob
+    csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
+    if not csv_files:
+        print(f"Error: No CSV files found in '{data_dir}'")
+        return 1
+    file_path = csv_files[0]  # Use the first CSV file found
+        
     # Load data
     df = load_rnaseq_data(file_path)
     if df is None:
