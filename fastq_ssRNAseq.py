@@ -672,3 +672,542 @@ def quality_to_color(quality):
         return 'green'
     
     
+def analyze_fastq_pair(args):
+    """Main function to analyze paired FASTQ files for single-cell RNA-seq."""
+    r1_file, r2_file, options = args
+    
+    results = {
+        "r1_filename": os.path.basename(r1_file),
+        "r2_filename": os.path.basename(r2_file),
+    }
+    
+    try:
+        # Check file integrity
+        r1_valid, r1_message = check_file_integrity(r1_file)
+        r2_valid, r2_message = check_file_integrity(r2_file)
+        
+        results["r1_is_valid"] = r1_valid
+        results["r1_validation_message"] = r1_message
+        results["r2_is_valid"] = r2_valid
+        results["r2_validation_message"] = r2_message
+        
+        if not r1_valid or not r2_valid:
+            logger.error(f"Files failed integrity check: {r1_file} or {r2_file}")
+            return results
+        
+        # Count total reads
+        r1_total_reads = count_reads(r1_file)
+        r2_total_reads = count_reads(r2_file)
+        
+        results["r1_total_reads"] = r1_total_reads
+        results["r2_total_reads"] = r2_total_reads
+        
+        if r1_total_reads != r2_total_reads:
+            results["read_count_warning"] = f"R1 ({r1_total_reads}) and R2 ({r2_total_reads}) have different read counts"
+            logger.warning(results["read_count_warning"])
+        
+        if r1_total_reads == 0 or r2_total_reads == 0:
+            logger.error(f"No reads found in {r1_file} or {r2_file}")
+            return results
+        
+        # Sample reads for analysis
+        sample_size = options.sample_size if options.sample_size > 0 else min(r1_total_reads, r2_total_reads)
+        sample_size = min(sample_size, min(r1_total_reads, r2_total_reads))
+        
+        # Get protocol settings
+        protocol_name = options.protocol
+        protocol = PROTOCOLS[protocol_name].copy()
+        
+        # Override protocol settings if specified
+        if options.barcode_pos and protocol_name == "custom":
+            protocol["r1_cell_barcode_pos"] = options.barcode_pos
+        if options.umi_pos and protocol_name == "custom":
+            protocol["r1_umi_pos"] = options.umi_pos
+        if options.expected_cells and protocol_name == "custom":
+            protocol["expected_cells"] = options.expected_cells
+        
+        # Load whitelist if provided
+        whitelist = None
+        whitelist_file = options.whitelist if options.whitelist else protocol.get("whitelist_file")
+        if whitelist_file:
+            whitelist = load_barcode_whitelist(whitelist_file)
+            results["whitelist_loaded"] = whitelist is not None
+            results["whitelist_size"] = len(whitelist) if whitelist else 0
+        
+        # Load sampled records
+        logger.info(f"Sampling {sample_size} reads from {r1_file} and {r2_file}")
+        
+        r1_records = []
+        r2_records = []
+        
+        # Paired read iteration
+        with open_fastq(r1_file) as f1, open_fastq(r2_file) as f2:
+            r1_iter = SeqIO.parse(f1, "fastq")
+            r2_iter = SeqIO.parse(f2, "fastq")
+            
+            # Take a random sample
+            if sample_size < min(r1_total_reads, r2_total_reads):
+                indices = set(random.sample(range(min(r1_total_reads, r2_total_reads)), sample_size))
+                for i, (r1, r2) in enumerate(zip(r1_iter, r2_iter)):
+                    if i in indices:
+                        r1_records.append(r1)
+                        r2_records.append(r2)
+                    if len(r1_records) >= sample_size:
+                        break
+            else:
+                # Take all reads up to sample_size
+                for i, (r1, r2) in enumerate(zip(r1_iter, r2_iter)):
+                    if i >= sample_size:
+                        break
+                    r1_records.append(r1)
+                    r2_records.append(r2)
+        
+        logger.info(f"Analyzing {len(r1_records)} paired reads")
+        
+        # Check if we have a protocol with barcodes and UMIs
+        has_barcodes = protocol["r1_cell_barcode_pos"] is not None
+        
+        # Extract barcodes and UMIs
+        barcode_counts = Counter()
+        barcode_qualities = []
+        umi_qualities = []
+        umi_counts_per_cell = defaultdict(list)
+        
+        if has_barcodes:
+            for r1 in r1_records:
+                barcode, corrected_barcode, umi, qualities = extract_cell_barcode_umi(r1, protocol, whitelist)
+                
+                if barcode and corrected_barcode:
+                    barcode_counts[corrected_barcode] += 1
+                    
+                    if umi:
+                        umi_counts_per_cell[corrected_barcode].append(umi)
+                    
+                    # Store quality scores
+                    if qualities and qualities[0]:
+                        barcode_qual, umi_qual = qualities
+                        barcode_qualities.append(sum(barcode_qual) / len(barcode_qual) if barcode_qual else 0)
+                        if umi_qual:
+                            umi_qualities.append(sum(umi_qual) / len(umi_qual) if umi_qual else 0)
+        
+        # Store barcode and UMI quality stats
+        barcode_qual_data = {}
+        if barcode_qualities:
+            barcode_qual_data["barcode_avg_qual"] = barcode_qualities
+            barcode_qual_data["barcode_mean_qual"] = np.mean(barcode_qualities)
+            barcode_qual_data["barcode_median_qual"] = np.median(barcode_qualities)
+            barcode_qual_data["barcode_min_qual"] = np.min(barcode_qualities)
+            barcode_qual_data["barcode_q30_pct"] = sum(1 for q in barcode_qualities if q >= 30) / len(barcode_qualities) * 100
+        
+        if umi_qualities:
+            barcode_qual_data["umi_avg_qual"] = umi_qualities
+            barcode_qual_data["umi_mean_qual"] = np.mean(umi_qualities)
+            barcode_qual_data["umi_median_qual"] = np.median(umi_qualities)
+            barcode_qual_data["umi_min_qual"] = np.min(umi_qualities)
+            barcode_qual_data["umi_q30_pct"] = sum(1 for q in umi_qualities if q >= 30) / len(umi_qualities) * 100
+        
+        results["barcode_qual_data"] = barcode_qual_data
+        
+        # Analyze read quality
+        r1_sequences = [str(record.seq) for record in r1_records]
+        r2_sequences = [str(record.seq) for record in r2_records]
+        
+        r1_quality_stats = analyze_quality_scores(r1_records, options.phred_encoding)
+        r2_quality_stats = analyze_quality_scores(r2_records, options.phred_encoding)
+        
+        results["quality_stats"] = {
+            "r1": r1_quality_stats,
+            "r2": r2_quality_stats,
+        }
+        
+        # Base composition
+        r1_base_counts, r1_base_pct = calculate_base_stats(r1_sequences)
+        r2_base_counts, r2_base_pct = calculate_base_stats(r2_sequences)
+        
+        results["base_stats"] = {
+            "r1": {"counts": r1_base_counts, "percentages": r1_base_pct},
+            "r2": {"counts": r2_base_counts, "percentages": r2_base_pct},
+        }
+        
+        # Analyze cell barcodes (if applicable)
+        if has_barcodes and barcode_counts:
+            cell_barcode_result = analyze_cell_barcodes(
+                barcode_counts, 
+                protocol,
+                method=options.knee_method
+            )
+            results["cell_barcode_analysis"] = cell_barcode_result
+            
+            # Additional analysis for cells
+            if cell_barcode_result["detected_cells"] > 0:
+                # Ambient RNA estimation
+                ambient_result = estimate_ambient_rna(barcode_counts, cell_barcode_result)
+                results["ambient_analysis"] = ambient_result
+                
+                # Multiplet detection
+                multiplet_result = detect_potential_multiplets(barcode_counts, cell_barcode_result)
+                results["multiplet_analysis"] = multiplet_result
+                
+                # UMI saturation
+                if umi_counts_per_cell:
+                    saturation_result = analyze_umi_saturation(umi_counts_per_cell)
+                    results["saturation_analysis"] = saturation_result
+        
+        return results
+    
+    except Exception as e:
+        logger.error(f"Error analyzing {r1_file} and {r2_file}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        results["error"] = str(e)
+        return results
+
+def analyze_quality_scores(records, phred_encoding):
+    """Analyze quality scores across positions."""
+    if not records:
+        return {}
+    
+    # Get the length of the longest read
+    max_length = max(len(record.seq) for record in records)
+    
+    # Initialize arrays to store quality scores and counts
+    total_scores = np.zeros(max_length)
+    counts = np.zeros(max_length, dtype=int)
+    
+    # Sum quality scores
+    for record in records:
+        quality_scores = calculate_phred_scores(record, phred_encoding)
+        length = len(quality_scores)
+        total_scores[:length] += quality_scores
+        counts[:length] += 1
+    
+    # Calculate mean quality per position
+    with np.errstate(divide='ignore', invalid='ignore'):
+        mean_quality = np.divide(total_scores, counts)
+        mean_quality = np.nan_to_num(mean_quality)
+    
+    # Calculate quality score distribution
+    all_scores = []
+    for record in records:
+        all_scores.extend(calculate_phred_scores(record, phred_encoding))
+    
+    quality_distribution = Counter(all_scores)
+    
+    return {
+        "per_position_quality": {i: score for i, score in enumerate(mean_quality)},
+        "quality_distribution": dict(quality_distribution),
+        "mean_quality": np.mean(all_scores),
+        "min_quality": np.min(all_scores) if all_scores else 0
+    }
+
+def generate_report(results, output_dir):
+    """Generate an HTML report with the QC results."""
+    report_file = os.path.join(output_dir, "sc_qc_report.html")
+    
+    with open(report_file, 'w') as f:
+        # Start HTML report
+        f.write("""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Single-Cell RNA-Seq QC Report</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                h1 { color: #2c3e50; }
+                h2 { color: #3498db; margin-top: 30px; }
+                h3 { color: #2980b9; }
+                .summary { background-color: #f8f9fa; padding: 15px; border-radius: 5px; }
+                .warning { color: #e74c3c; }
+                .pass { color: #2ecc71; }
+                .file { margin-bottom: 40px; border-bottom: 1px solid #ddd; padding-bottom: 20px; }
+                table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; }
+                img { max-width: 100%; height: auto; margin-top: 15px; }
+                .protocol-info { background-color: #e8f4f8; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+                .metrics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 15px; margin: 20px 0; }
+                .metric-card { background-color: #f8f9fa; padding: 15px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+                .metric-value { font-size: 24px; font-weight: bold; margin: 10px 0; }
+                .metric-label { font-size: 14px; color: #7f8c8d; }
+                .figures { display: grid; grid-template-columns: repeat(auto-fill, minmax(450px, 1fr)); gap: 20px; margin: 20px 0; }
+            </style>
+        </head>
+        <body>
+            <h1>Single-Cell RNA-Seq Quality Control Report</h1>
+            <div class="summary">
+                <p>Generated on: %s</p>
+                <p>Total sample pairs analyzed: %d</p>
+            </div>
+        """ % (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), len(results)))
+        
+        # For each file pair
+        for result in results:
+            r1_filename = result["r1_filename"]
+            r2_filename = result["r2_filename"]
+            f.write(f"<div class='file'><h2>Sample: {os.path.splitext(r1_filename)[0]}</h2>")
+            
+            # Files info
+            f.write("<div class='protocol-info'>")
+            f.write(f"<p>R1 (Barcode/UMI): {r1_filename}</p>")
+            f.write(f"<p>R2 (cDNA): {r2_filename}</p>")
+            
+            # Protocol info
+            protocol_name = result.get("protocol_name", "unknown")
+            f.write(f"<p>Protocol: {protocol_name}</p>")
+            f.write("</div>")
+            
+            # Validation status
+            r1_status_class = "pass" if result.get("r1_is_valid", False) else "warning"
+            r2_status_class = "pass" if result.get("r2_is_valid", False) else "warning"
+            r1_status_msg = result.get("r1_validation_message", "No validation performed")
+            r2_status_msg = result.get("r2_validation_message", "No validation performed")
+            
+            f.write("<h3>File Validation</h3>")
+            f.write(f"<p>R1: <span class='{r1_status_class}'>{r1_status_msg}</span></p>")
+            f.write(f"<p>R2: <span class='{r2_status_class}'>{r2_status_msg}</span></p>")
+            
+            if "read_count_warning" in result:
+                f.write(f"<p class='warning'>{result['read_count_warning']}</p>")
+            
+            # Basic stats
+            f.write("<h3>Basic Statistics</h3>")
+            f.write("<div class='metrics-grid'>")
+            
+            # Read counts
+            f.write("<div class='metric-card'>")
+            f.write("<div class='metric-label'>Total Reads</div>")
+            f.write(f"<div class='metric-value'>{result.get('r1_total_reads', 'N/A'):,}</div>")
+            f.write("</div>")
+            
+            # Cell barcode analysis
+            cell_analysis = result.get("cell_barcode_analysis", {})
+            if cell_analysis:
+                # Expected vs detected cells
+                f.write("<div class='metric-card'>")
+                f.write("<div class='metric-label'>Expected Cells</div>")
+                f.write(f"<div class='metric-value'>{cell_analysis.get('expected_cells', 'N/A'):,}</div>")
+                f.write("</div>")
+                
+                f.write("<div class='metric-card'>")
+                f.write("<div class='metric-label'>Detected Cells</div>")
+                cells_class = "warning" if cell_analysis.get("cells_warning", False) else "pass"
+                f.write(f"<div class='metric-value {cells_class}'>{cell_analysis.get('detected_cells', 'N/A'):,}</div>")
+                f.write("</div>")
+                
+                # Total barcodes
+                f.write("<div class='metric-card'>")
+                f.write("<div class='metric-label'>Total Unique Barcodes</div>")
+                f.write(f"<div class='metric-value'>{cell_analysis.get('total_barcodes', 'N/A'):,}</div>")
+                f.write("</div>")
+            
+            # Quality stats
+            quality_stats = result.get("quality_stats", {})
+            if "r1" in quality_stats and "r2" in quality_stats:
+                r1_mean_quality = quality_stats["r1"].get("mean_quality", 0)
+                r2_mean_quality = quality_stats["r2"].get("mean_quality", 0)
+                
+                r1_quality_class = "warning" if r1_mean_quality < 30 else "pass"
+                r2_quality_class = "warning" if r2_mean_quality < 30 else "pass"
+                
+                f.write("<div class='metric-card'>")
+                f.write("<div class='metric-label'>R1 Mean Quality</div>")
+                f.write(f"<div class='metric-value {r1_quality_class}'>{r1_mean_quality:.1f}</div>")
+                f.write("</div>")
+                
+                f.write("<div class='metric-card'>")
+                f.write("<div class='metric-label'>R2 Mean Quality</div>")
+                f.write(f"<div class='metric-value {r2_quality_class}'>{r2_mean_quality:.1f}</div>")
+                f.write("</div>")
+            
+            # Barcode and UMI quality
+            barcode_qual_data = result.get("barcode_qual_data", {})
+            if barcode_qual_data:
+                barcode_q30 = barcode_qual_data.get("barcode_q30_pct", 0)
+                umi_q30 = barcode_qual_data.get("umi_q30_pct", 0)
+                
+                barcode_class = "warning" if barcode_q30 < 80 else "pass"
+                umi_class = "warning" if umi_q30 < 80 else "pass"
+                
+                f.write("<div class='metric-card'>")
+                f.write("<div class='metric-label'>Barcode Q30 Percentage</div>")
+                f.write(f"<div class='metric-value {barcode_class}'>{barcode_q30:.1f}%</div>")
+                f.write("</div>")
+                
+                if "umi_q30_pct" in barcode_qual_data:
+                    f.write("<div class='metric-card'>")
+                    f.write("<div class='metric-label'>UMI Q30 Percentage</div>")
+                    f.write(f"<div class='metric-value {umi_class}'>{umi_q30:.1f}%</div>")
+                    f.write("</div>")
+            
+            f.write("</div>") # End metrics grid
+            
+            # Advanced analysis
+            f.write("<h3>Advanced Analysis</h3>")
+            f.write("<div class='metrics-grid'>")
+            
+            # Ambient RNA
+            ambient_analysis = result.get("ambient_analysis", {})
+            if ambient_analysis and "ambient_pct" in ambient_analysis:
+                ambient_pct = ambient_analysis.get("ambient_pct", 0)
+                ambient_class = "warning" if ambient_analysis.get("ambient_warning", False) else "pass"
+                
+                f.write("<div class='metric-card'>")
+                f.write("<div class='metric-label'>Ambient RNA Estimation</div>")
+                f.write(f"<div class='metric-value {ambient_class}'>{ambient_pct:.1f}%</div>")
+                f.write(f"<div>{ambient_analysis.get('ambient_estimation', '')}</div>")
+                f.write("</div>")
+            
+            # Multiplet analysis
+            multiplet_analysis = result.get("multiplet_analysis", {})
+            if multiplet_analysis and "multiplet_rate" in multiplet_analysis:
+                multiplet_rate = multiplet_analysis.get("multiplet_rate", 0)
+                multiplet_class = "warning" if multiplet_analysis.get("multiplet_warning", False) else "pass"
+                
+                f.write("<div class='metric-card'>")
+                f.write("<div class='metric-label'>Potential Multiplet Rate</div>")
+                f.write(f"<div class='metric-value {multiplet_class}'>{multiplet_rate:.1f}%</div>")
+                f.write(f"<div>{multiplet_analysis.get('multiplet_estimation', '')}</div>")
+                f.write("</div>")
+                
+                # Expected doublet rate
+                expected_rate = multiplet_analysis.get("expected_doublet_rate")
+                if expected_rate is not None:
+                    f.write("<div class='metric-card'>")
+                    f.write("<div class='metric-label'>Expected Doublet Rate</div>")
+                    f.write(f"<div class='metric-value'>{expected_rate:.1f}%</div>")
+                    f.write("</div>")
+            
+            # UMI saturation
+            saturation_analysis = result.get("saturation_analysis", {})
+            if saturation_analysis and "final_saturation" in saturation_analysis:
+                saturation = saturation_analysis.get("final_saturation", 0) * 100
+                saturation_class = "warning" if saturation_analysis.get("saturation_warning", False) else "pass"
+                
+                f.write("<div class='metric-card'>")
+                f.write("<div class='metric-label'>Sequencing Saturation</div>")
+                f.write(f"<div class='metric-value {saturation_class}'>{saturation:.1f}%</div>")
+                f.write(f"<div>{saturation_analysis.get('saturation_estimation', '')}</div>")
+                f.write("</div>")
+            
+            f.write("</div>") # End metrics grid
+            
+            # Base composition
+            base_stats = result.get("base_stats", {})
+            if base_stats:
+                f.write("<h3>Base Composition</h3>")
+                f.write("<table>")
+                f.write("<tr><th>Base</th><th>R1 Count</th><th>R1 Percentage</th><th>R2 Count</th><th>R2 Percentage</th></tr>")
+                
+                for base in ['A', 'C', 'G', 'T', 'N']:
+                    r1_count = base_stats.get("r1", {}).get("counts", {}).get(base, 0)
+                    r1_pct = base_stats.get("r1", {}).get("percentages", {}).get(base, 0)
+                    r2_count = base_stats.get("r2", {}).get("counts", {}).get(base, 0)
+                    r2_pct = base_stats.get("r2", {}).get("percentages", {}).get(base, 0)
+                    
+                    f.write(f"<tr><td>{base}</td><td>{r1_count:,}</td><td>{r1_pct:.2f}%</td><td>{r2_count:,}</td><td>{r2_pct:.2f}%</td></tr>")
+                
+                f.write("</table>")
+            
+            # Figures
+            f.write("<h3>Visualizations</h3>")
+            f.write("<div class='figures'>")
+            
+            # Add barcode knee plot
+            knee_plot = os.path.join(".", f"{os.path.splitext(r1_filename)[0]}_barcode_knee.png")
+            rel_knee_path = os.path.basename(knee_plot)
+            f.write(f"<div><img src='{rel_knee_path}' alt='Barcode Knee Plot'></div>")
+            
+            # Add quality heatmap
+            quality_plot = os.path.join(".", f"{os.path.splitext(r1_filename)[0]}_quality_heatmap.png")
+            rel_quality_path = os.path.basename(quality_plot)
+            f.write(f"<div><img src='{rel_quality_path}' alt='Quality Heatmap'></div>")
+            
+            # Add barcode quality plot
+            barcode_plot = os.path.join(".", f"{os.path.splitext(r1_filename)[0]}_barcode_quality.png")
+            rel_barcode_path = os.path.basename(barcode_plot)
+            f.write(f"<div><img src='{rel_barcode_path}' alt='Barcode Quality'></div>")
+            
+            # Add saturation plot
+            saturation_plot = os.path.join(".", f"{os.path.splitext(r1_filename)[0]}_saturation.png")
+            rel_saturation_path = os.path.basename(saturation_plot)
+            f.write(f"<div><img src='{rel_saturation_path}' alt='Saturation Curve'></div>")
+            
+            f.write("</div>") # End figures
+            
+            f.write("</div>") # End file div
+            
+        # End HTML report
+        f.write("""
+        </body>
+        </html>
+        """)
+    
+    logger.info(f"Report generated: {report_file}")
+    return report_file
+
+def main():
+    """Main function."""
+    args = parse_arguments()
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output, exist_ok=True)
+    
+    # Validate input files
+    if len(args.read1) != len(args.read2):
+        logger.error("Number of R1 and R2 files must match")
+        sys.exit(1)
+    
+    logger.info(f"Starting QC analysis for {len(args.read1)} paired files")
+    
+    # Prepare tasks
+    tasks = [(r1, r2, args) for r1, r2 in zip(args.read1, args.read2)]
+    
+    # Process files
+    results = []
+    if args.threads > 1 and len(tasks) > 1:
+        with mp.Pool(processes=min(args.threads, len(tasks))) as pool:
+            results = pool.map(analyze_fastq_pair, tasks)
+    else:
+        results = [analyze_fastq_pair(task) for task in tasks]
+    
+    # Generate plots for each file pair
+    for result in results:
+        r1_filename = result["r1_filename"]
+        base_name = os.path.splitext(r1_filename)[0]
+        
+        # Add protocol name to result
+        result["protocol_name"] = args.protocol
+        
+        # Plot barcode knee plot
+        cell_analysis = result.get("cell_barcode_analysis")
+        if cell_analysis:
+            knee_plot = os.path.join(args.output, f"{base_name}_barcode_knee.png")
+            plot_barcode_knee(cell_analysis, knee_plot)
+        
+        # Plot quality heatmap
+        quality_stats = result.get("quality_stats")
+        if quality_stats:
+            quality_plot = os.path.join(args.output, f"{base_name}_quality_heatmap.png")
+            plot_quality_heatmap(quality_stats, quality_plot)
+        
+        # Plot barcode and UMI quality
+        barcode_qual_data = result.get("barcode_qual_data")
+        if barcode_qual_data:
+            barcode_plot = os.path.join(args.output, f"{base_name}_barcode_quality.png")
+            plot_barcode_quality(barcode_qual_data, barcode_plot)
+        
+        # Plot saturation curve
+        saturation_analysis = result.get("saturation_analysis")
+        if saturation_analysis:
+            saturation_plot = os.path.join(args.output, f"{base_name}_saturation.png")
+            plot_saturation_curve(saturation_analysis, saturation_plot)
+    
+    # Generate report
+    report_file = generate_report(results, args.output)
+    
+    logger.info("QC analysis completed successfully")
+    logger.info(f"Results available in {args.output}")
+    logger.info(f"Report: {report_file}")
+
+if __name__ == "__main__":
+    main()
