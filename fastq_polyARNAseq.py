@@ -641,7 +641,7 @@ def main():
                 read_count = len(stats['base_stats']['read_lengths'])
                 avg_read_len = statistics.mean(stats['base_stats']['read_lengths']) if stats['base_stats']['read_lengths'] else 0
                 avg_gc = statistics.mean(stats['base_stats']['gc_content']) if stats['base_stats']['gc_content'] else 0
-                
+                 
                 f.write(f"  Reads: {read_count:,}\n")
                 f.write(f"  Avg Length: {avg_read_len:.2f} bp\n")
                 f.write(f"  Avg Quality: {stats['quality_stats']['overall_mean']:.2f}\n")
