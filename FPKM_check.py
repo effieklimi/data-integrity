@@ -29,7 +29,6 @@ def load_rnaseq_data(file_path):
 
 def identify_sample_columns(df):
     """Identify sample columns (those containing count data)."""
-    # Assuming that columns with gene info are: ENSEMBL, name, type, chr, start, end, str
     metadata_cols = ['ENSEMBL', 'name', 'type', 'chr', 'start', 'end', 'str']
     sample_cols = [col for col in df.columns if col not in metadata_cols]
     time.sleep(3) 
@@ -43,10 +42,8 @@ def check_library_size(df, sample_cols, output_dir):
     print("\n=== Checking Library Size / Sequencing Depth ===")
     time.sleep(3) 
     
-    # Calculate total counts per sample
     lib_sizes = df[sample_cols].sum()
     
-    # Calculate mean and standard deviation
     mean_size = lib_sizes.mean()
     std_size = lib_sizes.std()
     min_size = lib_sizes.min()
@@ -61,7 +58,6 @@ def check_library_size(df, sample_cols, output_dir):
     print(f"Maximum library size: {max_size:.2f} ({lib_sizes.idxmax()})")
     time.sleep(3) 
     
-    # Identify potential outliers (>2 standard deviations from mean)
     low_outliers = lib_sizes[lib_sizes < (mean_size - 2 * std_size)]
     high_outliers = lib_sizes[lib_sizes > (mean_size + 2 * std_size)]
     
