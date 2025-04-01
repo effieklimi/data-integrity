@@ -14,6 +14,13 @@ from small RNA sequencing experiments, including:
 
 Usage:
     python small_rna_seq_qc.py -i input.fastq [-o output_directory] [options]
+
+Requirements:
+    - Python 3.6+
+    - Biopython
+    - Matplotlib
+    - Pandas
+    - NumPy
 """
 
 import os
@@ -499,4 +506,111 @@ def generate_report(results, output_dir):
                 mean_quality = quality_stats.get("mean_quality", 0)
                 quality_class = "warning" if mean_quality < 30 else "pass"
                 f.write(f"<tr><td>Mean quality score</td><td class='{quality_class}'>{mean_quality:.2f}</td></tr>")
-                f.write(f"<tr><td>Min quality score</td><td>{quality_stats.get('min_q
+                f.write(f"<tr><td>Min quality score</td><td>{quality_stats.get('min_quality', 'N/A')}</td></tr>")
+            
+            f.write("</table>")
+            
+            # Contamination
+            contamination = result.get("contamination", {})
+            if contamination:
+                f.write("<h3>Potential Contamination</h3>")
+                
+                # GC content
+                gc_info = contamination.get("gc_content", {})
+                gc_class = "warning" if gc_info.get("unusual", False) else "pass"
+                f.write(f"<p>GC Content: <span class='{gc_class}'>{gc_info.get('mean', 0):.2f}%</span></p>")
+                
+                # Sequence complexity
+                complexity = contamination.get("sequence_complexity", {})
+                complexity_class = "warning" if complexity.get("low_complexity", False) else "pass"
+                f.write(f"<p>Sequence Complexity: <span class='{complexity_class}'>{complexity.get('mean', 0):.2f}</span></p>")
+                
+                # Overrepresented sequences
+                overrep = contamination.get("overrepresented_sequences", {})
+                if overrep:
+                    f.write("<h4>Overrepresented Sequences</h4>")
+                    f.write("<table><tr><th>Sequence</th><th>Count</th></tr>")
+                    for seq, count in overrep.items():
+                        truncated_seq = seq[:20] + "..." if len(seq) > 20 else seq
+                        f.write(f"<tr><td>{truncated_seq}</td><td>{count}</td></tr>")
+                    f.write("</table>")
+            
+            # Adapter contamination
+            adapter_results = result.get("adapter_contamination", {})
+            if adapter_results:
+                f.write("<h3>Adapter Contamination</h3>")
+                f.write("<table><tr><th>Adapter</th><th>Percentage</th><th>Status</th></tr>")
+                for adapter, info in adapter_results.items():
+                    status_class = "warning" if info.get("is_contaminated", False) else "pass"
+                    status_text = "Contaminated" if info.get("is_contaminated", False) else "OK"
+                    f.write(f"<tr><td>{adapter}</td><td>{info.get('percentage', 0):.2f}%</td><td class='{status_class}'>{status_text}</td></tr>")
+                f.write("</table>")
+            
+            # Plots
+            f.write("<h3>Visualizations</h3>")
+            
+            plot_file = os.path.join(output_dir, f"{os.path.splitext(filename)[0]}_length_distribution.png")
+            rel_path = os.path.basename(plot_file)
+            f.write(f"<div><img src='{rel_path}' alt='Length Distribution'></div>")
+            
+            quality_plot = os.path.join(output_dir, f"{os.path.splitext(filename)[0]}_quality_heatmap.png")
+            rel_path = os.path.basename(quality_plot)
+            f.write(f"<div><img src='{rel_path}' alt='Quality Heatmap'></div>")
+            
+            f.write("</div>") # End file div
+            
+        # End HTML report
+        f.write("""
+        </body>
+        </html>
+        """)
+    
+    logger.info(f"Report generated: {report_file}")
+    return report_file
+
+def main():
+    """Main function."""
+    args = parse_arguments()
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output, exist_ok=True)
+    
+    logger.info(f"Starting QC analysis for {len(args.input)} files")
+    
+    # Prepare tasks
+    tasks = [(file, args) for file in args.input]
+    
+    # Process files
+    results = []
+    if args.threads > 1 and len(tasks) > 1:
+        with mp.Pool(processes=min(args.threads, len(tasks))) as pool:
+            results = pool.map(analyze_fastq, tasks)
+    else:
+        results = [analyze_fastq(task) for task in tasks]
+    
+    # Generate plots for each file
+    for result in results:
+        filename = result["filename"]
+        base_name = os.path.splitext(filename)[0]
+        
+        # Plot length distribution
+        length_stats = result.get("length_stats")
+        if length_stats:
+            plot_file = os.path.join(args.output, f"{base_name}_length_distribution.png")
+            plot_length_distribution(length_stats, plot_file)
+        
+        # Plot quality heatmap
+        quality_stats = result.get("quality_stats")
+        if quality_stats:
+            quality_plot = os.path.join(args.output, f"{base_name}_quality_heatmap.png")
+            plot_quality_heatmap(quality_stats, quality_plot)
+    
+    # Generate report
+    report_file = generate_report(results, args.output)
+    
+    logger.info("QC analysis completed successfully")
+    logger.info(f"Results available in {args.output}")
+    logger.info(f"Report: {report_file}")
+
+if __name__ == "__main__":
+    main()
